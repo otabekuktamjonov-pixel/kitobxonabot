@@ -377,21 +377,51 @@ def buyurtma_tel(message):
             return
         telefon = message.text
     buyurtma_data[message.chat.id]["telefon"] = telefon
-    msg = bot.send_message(message.chat.id, "📍 Manzilingizni yozing:", reply_markup=types.ReplyKeyboardRemove())
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("📍 Lokatsiya yuborish", request_location=True))
+    markup.add(types.KeyboardButton("✏️ Manzilni yozib kiriting"))
+    msg = bot.send_message(message.chat.id,
+        "📍 Manzilingizni yuboring:",
+        reply_markup=markup)
     bot.register_next_step_handler(msg, buyurtma_manzil)
 
 def buyurtma_manzil(message):
-    if message.text in ["🔍 Kitob qidirish", "📋 Barcha kitoblar", "🛒 Buyurtma",
-                        "📞 Bog'lanish", "👨‍💼 Admin panel", "🔙 Orqaga",
-                        "🏆 Top kitoblar", "📦 Mening buyurtmalarim"]:
+    if message.chat.id not in buyurtma_data:
+        bot.send_message(message.chat.id, "❌ Xatolik! Qaytadan boshlang.", reply_markup=asosiy_menyu(message.chat.id))
+        return
+
+    if message.location:
+        lat = message.location.latitude
+        lon = message.location.longitude
+        buyurtma_data[message.chat.id]["manzil"] = f"📍 Lokatsiya yuborildi"
+        buyurtma_data[message.chat.id]["lokatsiya"] = f"{lat},{lon}"
+    elif message.text == "✏️ Manzilni yozib kiriting":
+        msg = bot.send_message(message.chat.id, "📍 Manzilingizni yozing:", reply_markup=types.ReplyKeyboardRemove())
+        bot.register_next_step_handler(msg, buyurtma_manzil_matn)
+        return
+    elif message.text in ["🔍 Kitob qidirish", "📋 Barcha kitoblar", "🛒 Buyurtma",
+                          "📞 Bog'lanish", "👨‍💼 Admin panel", "🔙 Orqaga",
+                          "🏆 Top kitoblar", "📦 Mening buyurtmalarim"]:
         bot.process_new_messages([message])
         return
+    else:
+        buyurtma_data[message.chat.id]["manzil"] = message.text
+        buyurtma_data[message.chat.id]["lokatsiya"] = ""
+
+    # Promo kod so'rash
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.row("⏭ Promo kodsiz davom etish")
+    msg = bot.send_message(message.chat.id,
+        "🎁 Promo kodingiz bormi? Yozing yoki o'tkazib yuboring:",
+        reply_markup=markup)
+    bot.register_next_step_handler(msg, buyurtma_promo)
+
+def buyurtma_manzil_matn(message):
     if message.chat.id not in buyurtma_data:
         bot.send_message(message.chat.id, "❌ Xatolik! Qaytadan boshlang.", reply_markup=asosiy_menyu(message.chat.id))
         return
     buyurtma_data[message.chat.id]["manzil"] = message.text
-
-    # Promo kod so'rash
+    buyurtma_data[message.chat.id]["lokatsiya"] = ""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.row("⏭ Promo kodsiz davom etish")
     msg = bot.send_message(message.chat.id,
@@ -420,25 +450,22 @@ def buyurtma_promo(message):
             data["narx"] = yangi_narx
             data["promo_kod"] = message.text.upper().strip()
             data["chegirma"] = chegirma
-
-            # Foydalanish sonini yangilash
             kod = message.text.upper().strip()
             if "foydalanganlar" not in promokodlar[kod]:
                 promokodlar[kod]["foydalanganlar"] = {}
             user_key = str(message.chat.id)
             promokodlar[kod]["foydalanganlar"][user_key] = promokodlar[kod]["foydalanganlar"].get(user_key, 0) + 1
             saqlash_promokodlar()
-
             chegirma_text = f"🎁 Promo kod: {kod} (-{chegirma}%)\n💰 Chegirmali narx: <b>{yangi_narx}</b>\n"
             bot.send_message(message.chat.id, xabar, reply_markup=types.ReplyKeyboardRemove())
         else:
             bot.send_message(message.chat.id, xabar, reply_markup=types.ReplyKeyboardRemove())
 
-    # Buyurtmani yakunlash
     buyurtmalar.append({
         "ism": data["ism"],
         "telefon": data["telefon"],
         "manzil": data["manzil"],
+        "lokatsiya": data.get("lokatsiya", ""),
         "kitob": data["kitob"],
         "narx": data.get("narx", data["asl_narx"]),
         "asl_narx": data["asl_narx"],
@@ -470,7 +497,7 @@ def buyurtma_promo(message):
     markup.add(types.InlineKeyboardButton("📸 Chek yuborish", callback_data=f"chek_{buyurtma_index}"))
     bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="HTML")
 
-    promo_info = f"\n🎁 Promo kod: {data.get('promo_kod', 'Yo\'q')}" if data.get("promo_kod") else ""
+    promo_info = f"\n🎁 Promo kod: {data.get('promo_kod', '')}" if data.get("promo_kod") else ""
     bot.send_message(ADMIN_ID,
         f"🛒 <b>YANGI BUYURTMA #{buyurtma_index + 1}</b>\n\n"
         f"📚 Kitob: {data['kitob']}\n"
@@ -480,6 +507,14 @@ def buyurtma_promo(message):
         f"📍 Manzil: {data['manzil']}\n"
         f"📌 Holat: ⏳ To'lov kutilmoqda",
         parse_mode="HTML")
+
+    # Adminga lokatsiya yuborish
+    if data.get("lokatsiya"):
+        try:
+            lat, lon = data["lokatsiya"].split(",")
+            bot.send_location(ADMIN_ID, float(lat), float(lon))
+        except:
+            pass
 
     if message.chat.id in buyurtma_data:
         del buyurtma_data[message.chat.id]
@@ -672,17 +707,13 @@ def promo_chegirma(message):
             bot.send_message(message.chat.id, "❌ 1 dan 100 gacha son yozing!")
             return
         kod = yangi_promo[message.chat.id]["kod"]
-        promokodlar[kod] = {
-            "chegirma": chegirma,
-            "foydalanganlar": {}
-        }
+        promokodlar[kod] = {"chegirma": chegirma, "foydalanganlar": {}}
         saqlash_promokodlar()
         bot.send_message(message.chat.id,
             f"✅ <b>Promo kod qo'shildi!</b>\n\n"
             f"🔑 Kod: <b>{kod}</b>\n"
             f"💰 Chegirma: <b>{chegirma}%</b>",
-            parse_mode="HTML",
-            reply_markup=promo_menyu())
+            parse_mode="HTML", reply_markup=promo_menyu())
         if message.chat.id in yangi_promo:
             del yangi_promo[message.chat.id]
     except:
@@ -756,7 +787,7 @@ def kitob_narx(message):
 def kitob_sahifa(message):
     if message.text in ["➕ Kitob qo'shish", "🗑 Kitob o'chirish", "📊 Statistika",
                         "🛒 Buyurtmalar", "📢 Xabar yuborish", "🔙 Orqaga", "🎁 Promo kodlar"]:
-        bot.process_new_messages([message])
+        bot.process_new_Messages([message])
         return
     yangi_kitob[message.chat.id]["sahifa"] = message.text
     msg = bot.send_message(message.chat.id, "🎭 Janr:")
@@ -779,8 +810,7 @@ def kitob_janr(message):
         f"💰 {k['narx']}\n"
         f"📄 {k['sahifa']} sahifa\n"
         f"🎭 {k['janr']}",
-        parse_mode="HTML",
-        reply_markup=admin_menyu())
+        parse_mode="HTML", reply_markup=admin_menyu())
     if message.chat.id in yangi_kitob:
         del yangi_kitob[message.chat.id]
 
@@ -875,7 +905,6 @@ def statistika(message):
             top_text += f"{i}. {nom} — {soni} ta\n"
     else:
         top_text = "Hozircha yo'q"
-
     text = (
         f"📊 <b>Statistika:</b>\n\n"
         f"👥 Foydalanuvchilar: <b>{len(foydalanuvchilar)}</b>\n"
